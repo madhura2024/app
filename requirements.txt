@@ -1,0 +1,5 @@
+gradio
+transformers
+torch
+PyPDF2
+sentencepiece
