@@ -112,34 +112,46 @@ def rag_answer(question, retrieved_chunks):
 
 # ------------------ RAG Function with One Question ------------------
 def askQuestionsRAG(text):
-    # Use a spinner to show that the system is processing the question
+    # Use a spinner to show the user that the system is processing the question
     with st.spinner("Processing your question..."):
-        chunks = chunk_text(text)
-        embeddings = embed_chunks(chunks)
-        index = build_faiss_index(np.array(embeddings))
+        try:
+            # Step 1: Chunk the text into smaller chunks for embedding and retrieval
+            chunks = chunk_text(text)
+            st.write(f"Total number of chunks: {len(chunks)}")  # Debug: check the number of chunks
+            if len(chunks) == 0:
+                st.error("No chunks created. Please check the document content.")
+                return
 
-        # Initialize the session state to store if the user has asked a question
-        if "question_asked" not in st.session_state:
-            st.session_state["question_asked"] = False
+            # Step 2: Create embeddings for the chunks
+            embeddings = embed_chunks(chunks)
+            st.write(f"Sample embeddings: {embeddings[:2]}")  # Debug: show sample embeddings
+            if len(embeddings) == 0:
+                st.error("Failed to generate embeddings. Please check the chunking process.")
+                return
 
-        if st.session_state["question_asked"]:
-            st.write("You can only ask one question.")
-            # Optionally, allow user to reset the session
-            if st.button("Reset"):
-                st.session_state["question_asked"] = False
-                st.experimental_rerun()  # Rerun the app to clear the previous input
-        else:
-            # Ask the user for a question
-            question = st.text_input("Ask a question about the document:", key="question")
+            # Step 3: Build the FAISS index for efficient retrieval
+            index = build_faiss_index(np.array(embeddings))
+            st.write("FAISS index created successfully.")  # Debug: check if FAISS index is created
+
+            # Step 4: Ask the user for a question
+            question = st.text_input("Ask a question about the document:")
 
             if question:
-                # Mark that the question has been asked
-                st.session_state["question_asked"] = True
+                st.write(f"Received question: {question}")  # Debug: log the received question
 
-                # Process the question (retrieving chunks, generating answer)
+                # Step 5: Retrieve relevant chunks from the FAISS index
                 retrieved_chunks = retrieve_chunks(question, chunks, index)
+                st.write(f"Retrieved chunks: {retrieved_chunks[:3]}")  # Debug: show top 3 retrieved chunks
+
+                if len(retrieved_chunks) == 0:
+                    st.error("No relevant chunks found. Try asking a different question.")
+                    return
+
+                # Step 6: Generate an answer using the retrieved chunks
                 answer = rag_answer(question, retrieved_chunks)
                 st.write("**Answer:**", answer)
+        except Exception as e:
+            st.error(f"An error occurred during the question-answering process: {str(e)}")
 
 
 # ------------------ Fine-Tuning ------------------
