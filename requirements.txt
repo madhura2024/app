@@ -1,5 +1,7 @@
-gradio
+streamlit
 transformers
-torch
-PyPDF2
 sentencepiece
+sentence-transformers
+faiss-cpu
+PyPDF2
+torch
