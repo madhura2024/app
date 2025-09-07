@@ -68,6 +68,7 @@ def findMainTopic(text):
 
 
 # ------------------ RAG Helpers ------------------
+
 def chunk_text(text, chunk_size=500, overlap=50):
     tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
     tokens = tokenizer.tokenize(text)
@@ -123,7 +124,6 @@ def askQuestionsRAG(text):
 
             # Step 2: Create embeddings for the chunks
             embeddings = embed_chunks(chunks)
-            st.write(f"Sample embeddings: {embeddings[:2]}")  # Debug: show sample embeddings
             if len(embeddings) == 0:
                 st.error("Failed to generate embeddings. Please check the chunking process.")
                 return
@@ -136,15 +136,13 @@ def askQuestionsRAG(text):
             question = st.text_input("Ask a question about the document:")
 
             if question:
-                st.write(f"Received question: {question}")  # Debug: log the received question
-
                 # Step 5: Retrieve relevant chunks from the FAISS index
                 retrieved_chunks = retrieve_chunks(question, chunks, index)
-                st.write(f"Retrieved chunks: {retrieved_chunks[:3]}")  # Debug: show top 3 retrieved chunks
-
                 if len(retrieved_chunks) == 0:
                     st.error("No relevant chunks found. Try asking a different question.")
                     return
+
+                st.write(f"Retrieved chunks: {retrieved_chunks[:3]}")  # Debug: show top 3 retrieved chunks
 
                 # Step 6: Generate an answer using the retrieved chunks
                 answer = rag_answer(question, retrieved_chunks)
@@ -154,6 +152,7 @@ def askQuestionsRAG(text):
 
 
 # ------------------ Fine-Tuning ------------------
+
 def load_or_init_model():
     model_name = "facebook/bart-large-cnn"
     if os.path.exists('./fine_tuned_model'):
