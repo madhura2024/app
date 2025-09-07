@@ -17,7 +17,9 @@ def getText():
         reader = PyPDF2.PdfReader(uploaded_file)
         content = ''
         for page in reader.pages:
-            content += page.extract_text()
+            text = page.extract_text()
+            if text:
+                content += text
     elif uploaded_file.name.lower().endswith('txt'):
         content = uploaded_file.read().decode('utf-8')
     else:
@@ -149,7 +151,8 @@ def fineTune(text, improvedSummary):
                 self.inputs = inputs
                 self.targets = targets
             def __len__(self):
-                return len(self.targets["input_ids"])
+                # fix here: use size(0) for tensors length
+                return self.targets["input_ids"].size(0)
             def __getitem__(self, idx):
                 item = {key: val[idx] for key, val in self.inputs.items()}
                 labels = self.targets["input_ids"][idx]
