@@ -5,5 +5,4 @@ sentence-transformers==2.7.0
 faiss-cpu==1.8.0
 PyPDF2==3.0.1
 numpy==1.26.4
-torch==2.2.2+cpu
--f https://download.pytorch.org/whl/torch_stable.html
+torch
