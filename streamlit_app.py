@@ -1,59 +1,16 @@
 import streamlit as st
-from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM, Trainer, TrainingArguments
 from sentence_transformers import SentenceTransformer
 import faiss
 import PyPDF2
 import torch
 import os
 import numpy as np
-import transformers
 
-# Silence warnings & tokenizer crash
-transformers.logging.set_verbosity_error()
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# -------------------------
-# Cached Models
-# -------------------------
-@st.cache_resource(show_spinner=False)
-def get_embedding_model():
-    return SentenceTransformer('all-MiniLM-L6-v2')
 
-@st.cache_resource(show_spinner=False)
-def get_summarizer():
-    return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
-@st.cache_resource(show_spinner=False)
-def get_sentiment_model():
-    return pipeline("sentiment-analysis")
 
-@st.cache_resource(show_spinner=False)
-def get_ner_model():
-    return pipeline("ner", grouped_entities=True)
-
-@st.cache_resource(show_spinner=False)
-def get_qa_model():
-    return pipeline("question-answering")
-
-@st.cache_resource(show_spinner=False)
-def get_qa_generator():
-    return pipeline("text2text-generation", model="sshleifer/distilbart-cnn-12-6")
-
-@st.cache_resource(show_spinner=False)
-def get_tokenizer_and_model():
-    model_path = './fine_tuned_model'
-    if os.path.exists(model_path):
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
-        st.success("Loaded fine-tuned model.")
-    else:
-        tokenizer = AutoTokenizer.from_pretrained("sshleifer/distilbart-cnn-12-6")
-        model = AutoModelForSeq2SeqLM.from_pretrained("sshleifer/distilbart-cnn-12-6")
-    return tokenizer, model
-
-# -------------------------
-# File Upload
-# -------------------------
 def getText():
     uploaded_file = st.file_uploader("Upload a PDF or TXT file", type=['pdf', 'txt'])
     if uploaded_file is None:
@@ -63,9 +20,7 @@ def getText():
         reader = PyPDF2.PdfReader(uploaded_file)
         content = ''
         for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                content += text
+            content += page.extract_text()
     elif uploaded_file.name.lower().endswith('txt'):
         content = uploaded_file.read().decode('utf-8')
     else:
@@ -73,54 +28,60 @@ def getText():
         content = None
     return content
 
-# -------------------------
-# Summarization
-# -------------------------
+
+
+
+
 def summarize(text):
-    summarizer = get_summarizer()
-    summaryResult = summarizer(text, max_length=150, min_length=30, do_sample=False)
+    summarizer = pipeline("summarization")
+    summaryResult = summarizer("Summarize this document clearly and concisely:\n" + text, max_length=150, min_length=30, do_sample=False)
     st.write("### Summary:")
     st.write(summaryResult[0]['summary_text'])
 
     userSummary = st.text_input("Is this summary good? If not, type your improved summary here. Otherwise, leave blank:")
     return summaryResult[0]['summary_text'], userSummary
 
-# -------------------------
-# Sentiment
-# -------------------------
+
+
+
+
 def analyzeSentiment(text):
-    sentimentModel = get_sentiment_model()
-    sentimentResult = sentimentModel(text[:512])
+    sentimentModel = pipeline("sentiment-analysis")
+    sentimentResult = sentimentModel("What is the overall sentiment of the following text?\n" + text[:512])
     st.write("### Sentiment of the text:")
     st.write(sentimentResult[0])
     return sentimentResult[0]
 
-# -------------------------
-# NER
-# -------------------------
+
+
+
+
 def findEntities(text):
-    nerModel = get_ner_model()
-    entitiesResult = nerModel(text[:1000])
+    nerModel = pipeline("ner", grouped_entities=True)
+    entitiesResult = nerModel("Extract and categorize named entities from the following:\n" + text[:1000])
     st.write("### Named entities found:")
     st.write(entitiesResult)
     return entitiesResult
 
-# -------------------------
-# Main Topic
-# -------------------------
+
+
+
+
 def findMainTopic(text):
-    qaModel = get_qa_model()
+    qaModel = pipeline("question-answering")
     question = "What is the main topic of the document?"
     answer = qaModel(question=question, context=text[:1000])
     st.write("### Main topic:")
     st.write(answer['answer'])
     return answer['answer']
 
-# -------------------------
-# RAG Helpers
-# -------------------------
+
+
+
+
+
 def chunk_text(text, chunk_size=500, overlap=50):
-    tokenizer = AutoTokenizer.from_pretrained("sshleifer/distilbart-cnn-12-6")
+    tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
     tokens = tokenizer.tokenize(text)
 
     chunks = []
@@ -132,10 +93,11 @@ def chunk_text(text, chunk_size=500, overlap=50):
         start += chunk_size - overlap
     return chunks
 
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+
 def embed_chunks(chunks):
-    embedding_model = get_embedding_model()
     embeddings = embedding_model.encode(chunks)
-    return np.array(embeddings).astype("float32")   # FIXED for FAISS
+    return embeddings
 
 def build_faiss_index(embeddings):
     dim = embeddings.shape[1]
@@ -144,13 +106,14 @@ def build_faiss_index(embeddings):
     return index
 
 def retrieve_chunks(question, chunks, index, top_k=3):
-    question_embedding = get_embedding_model().encode([question]).astype("float32")
+    question_embedding = embedding_model.encode([question])
     distances, indices = index.search(question_embedding, top_k)
     retrieved_chunks = [chunks[i] for i in indices[0]]
     return retrieved_chunks
 
+qa_generator = pipeline("text2text-generation", model="facebook/bart-large-cnn")
+
 def rag_answer(question, retrieved_chunks):
-    qa_generator = get_qa_generator()
     context = " ".join(retrieved_chunks)
     input_text = f"question: {question} context: {context}"
     output = qa_generator(input_text, max_length=150, min_length=30, do_sample=False)
@@ -159,28 +122,100 @@ def rag_answer(question, retrieved_chunks):
 def askQuestionsRAG(text):
     chunks = chunk_text(text)
     embeddings = embed_chunks(chunks)
-    index = build_faiss_index(embeddings)
+    index = build_faiss_index(np.array(embeddings))
 
     st.write("\nYou can now ask questions based on the document. Type your question and press enter.")
-    question = st.text_input("Ask a question or leave blank to stop:", key="rag_question")
-    if question:
-        try:
-            retrieved_chunks = retrieve_chunks(question, chunks, index)
-            answer = rag_answer(question, retrieved_chunks)
-            st.write("**Answer:**", answer)
-        except Exception as e:
-            st.exception(e)   # FIXED: show full error
+    while True:
+        question = st.text_input("Ask a question or leave blank to stop:", key="rag_question")
+        if not question:
+            break
+        retrieved_chunks = retrieve_chunks(question, chunks, index)
+        answer = rag_answer(question, retrieved_chunks)
+        st.write("**Answer:**", answer)
 
-# -------------------------
-# Fine-tuning (disabled on Cloud)
-# -------------------------
+
+
+
+
+
+
+
+def load_or_init_model():
+    model_name = "facebook/bart-large-cnn"
+    if os.path.exists('./fine_tuned_model'):
+        tokenizer = AutoTokenizer.from_pretrained('./fine_tuned_model')
+        model = AutoModelForSeq2SeqLM.from_pretrained('./fine_tuned_model')
+        st.write("Loaded fine-tuned model from disk.")
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        st.write("Loaded base model.")
+    return tokenizer, model
+
+
+
+
+
+
+
 def fineTune(text, improvedSummary):
-    st.warning("⚠ Fine-tuning disabled on Streamlit Cloud due to resource limits. Run locally instead.")
-    return
+    if text and improvedSummary.strip() != "":
+        tokenizer, model = load_or_init_model()
 
-# -------------------------
-# Main Run
-# -------------------------
+        inputEncodings = tokenizer([text], max_length=1024, truncation=True, padding="max_length", return_tensors="pt")
+        targetEncodings = tokenizer([improvedSummary], max_length=150, truncation=True, padding="max_length", return_tensors="pt")
+
+        class SummaryDataset(torch.utils.data.Dataset):
+            def __init__(self, inputs, targets):
+                self.inputs = inputs
+                self.targets = targets
+            def __len__(self):
+                return len(self.targets["input_ids"])
+            def __getitem__(self, idx):
+                item = {key: val[idx] for key, val in self.inputs.items()}
+                labels = self.targets["input_ids"][idx]
+                labels[labels == tokenizer.pad_token_id] = -100
+                item['labels'] = labels
+                return item
+
+        dataset = SummaryDataset(inputEncodings, targetEncodings)
+
+        trainingArgs = TrainingArguments(
+            output_dir='./results',
+            num_train_epochs=3,
+            per_device_train_batch_size=1,
+            logging_steps=10,
+            save_strategy="no",
+            learning_rate=2e-5,
+            weight_decay=0.01,
+            save_total_limit=1,
+            remove_unused_columns=False,
+            report_to=[],
+        )
+
+        trainer = Trainer(
+            model=model,
+            args=trainingArgs,
+            train_dataset=dataset,
+            tokenizer=tokenizer,
+        )
+
+        st.write("\nStarting fine-tuning on your improved summary... This may take some time.")
+        trainer.train()
+        st.write("\nFine-tuning complete! Your model has learned from your correction.")
+        model.save_pretrained('./fine_tuned_model')
+        tokenizer.save_pretrained('./fine_tuned_model')
+        st.write("Saved fine-tuned model and tokenizer to './fine_tuned_model'")
+    else:
+        st.write("\nNo improved summary provided; skipping fine-tuning.")
+
+
+
+
+
+
+
+
 def run():
     state = {}
     state['content'] = getText()
