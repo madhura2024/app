@@ -8,9 +8,6 @@ import os
 import numpy as np
 
 
-
-
-
 def getText():
     uploaded_file = st.file_uploader("Upload a PDF or TXT file", type=['pdf', 'txt'])
     if uploaded_file is None:
@@ -29,9 +26,6 @@ def getText():
     return content
 
 
-
-
-
 def summarize(text):
     summarizer = pipeline("summarization")
     summaryResult = summarizer("Summarize this document clearly and concisely:\n" + text, max_length=150, min_length=30, do_sample=False)
@@ -42,18 +36,12 @@ def summarize(text):
     return summaryResult[0]['summary_text'], userSummary
 
 
-
-
-
 def analyzeSentiment(text):
     sentimentModel = pipeline("sentiment-analysis")
     sentimentResult = sentimentModel("What is the overall sentiment of the following text?\n" + text[:512])
     st.write("### Sentiment of the text:")
     st.write(sentimentResult[0])
     return sentimentResult[0]
-
-
-
 
 
 def findEntities(text):
@@ -64,9 +52,6 @@ def findEntities(text):
     return entitiesResult
 
 
-
-
-
 def findMainTopic(text):
     qaModel = pipeline("question-answering")
     question = "What is the main topic of the document?"
@@ -74,10 +59,6 @@ def findMainTopic(text):
     st.write("### Main topic:")
     st.write(answer['answer'])
     return answer['answer']
-
-
-
-
 
 
 def chunk_text(text, chunk_size=500, overlap=50):
@@ -93,11 +74,14 @@ def chunk_text(text, chunk_size=500, overlap=50):
         start += chunk_size - overlap
     return chunks
 
+
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+
 
 def embed_chunks(chunks):
     embeddings = embedding_model.encode(chunks)
     return embeddings
+
 
 def build_faiss_index(embeddings):
     dim = embeddings.shape[1]
@@ -105,13 +89,16 @@ def build_faiss_index(embeddings):
     index.add(embeddings)
     return index
 
+
 def retrieve_chunks(question, chunks, index, top_k=3):
     question_embedding = embedding_model.encode([question])
     distances, indices = index.search(question_embedding, top_k)
     retrieved_chunks = [chunks[i] for i in indices[0]]
     return retrieved_chunks
 
+
 qa_generator = pipeline("text2text-generation", model="facebook/bart-large-cnn")
+
 
 def rag_answer(question, retrieved_chunks):
     context = " ".join(retrieved_chunks)
@@ -119,25 +106,22 @@ def rag_answer(question, retrieved_chunks):
     output = qa_generator(input_text, max_length=150, min_length=30, do_sample=False)
     return output[0]['generated_text']
 
+
 def askQuestionsRAG(text):
     chunks = chunk_text(text)
     embeddings = embed_chunks(chunks)
     index = build_faiss_index(np.array(embeddings))
 
     st.write("\nYou can now ask questions based on the document. Type your question and press enter.")
-    while True:
-        question = st.text_input("Ask a question or leave blank to stop:", key="rag_question")
-        if not question:
-            break
-        retrieved_chunks = retrieve_chunks(question, chunks, index)
-        answer = rag_answer(question, retrieved_chunks)
-        st.write("**Answer:**", answer)
 
-
-
-
-
-
+    question = st.text_input("Ask a question or leave blank to stop:", key="rag_question")
+    if question:
+        try:
+            retrieved_chunks = retrieve_chunks(question, chunks, index)
+            answer = rag_answer(question, retrieved_chunks)
+            st.write("**Answer:**", answer)
+        except Exception as e:
+            st.error(f"Error retrieving answer: {e}")
 
 
 def load_or_init_model():
@@ -151,11 +135,6 @@ def load_or_init_model():
         model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
         st.write("Loaded base model.")
     return tokenizer, model
-
-
-
-
-
 
 
 def fineTune(text, improvedSummary):
@@ -210,12 +189,6 @@ def fineTune(text, improvedSummary):
         st.write("\nNo improved summary provided; skipping fine-tuning.")
 
 
-
-
-
-
-
-
 def run():
     state = {}
     state['content'] = getText()
@@ -226,6 +199,7 @@ def run():
         state['topic'] = findMainTopic(state['content'])
         askQuestionsRAG(state['content'])
         fineTune(state['content'], state['userSummary'])
+
 
 if __name__ == "__main__":
     run()
