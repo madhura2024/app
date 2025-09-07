@@ -7,6 +7,43 @@ import torch
 import os
 import numpy as np
 
+# Load models once with caching
+@st.cache_resource
+def get_embedding_model():
+    return SentenceTransformer('all-MiniLM-L6-v2')
+
+@st.cache_resource
+def get_summarizer():
+    return pipeline("summarization", model="facebook/bart-large-cnn")
+
+@st.cache_resource
+def get_sentiment_model():
+    return pipeline("sentiment-analysis")
+
+@st.cache_resource
+def get_ner_model():
+    return pipeline("ner", grouped_entities=True)
+
+@st.cache_resource
+def get_qa_model():
+    return pipeline("question-answering")
+
+@st.cache_resource
+def get_qa_generator():
+    return pipeline("text2text-generation", model="facebook/bart-large-cnn")
+
+@st.cache_resource
+def get_tokenizer_and_model():
+    model_path = './fine_tuned_model'
+    if os.path.exists(model_path):
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
+        st.success("Loaded fine-tuned model.")
+    else:
+        tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
+        model = AutoModelForSeq2SeqLM.from_pretrained("facebook/bart-large-cnn")
+    return tokenizer, model
+
 
 def getText():
     uploaded_file = st.file_uploader("Upload a PDF or TXT file", type=['pdf', 'txt'])
@@ -29,7 +66,7 @@ def getText():
 
 
 def summarize(text):
-    summarizer = pipeline("summarization")
+    summarizer = get_summarizer()
     summaryResult = summarizer("Summarize this document clearly and concisely:\n" + text, max_length=150, min_length=30, do_sample=False)
     st.write("### Summary:")
     st.write(summaryResult[0]['summary_text'])
@@ -39,7 +76,7 @@ def summarize(text):
 
 
 def analyzeSentiment(text):
-    sentimentModel = pipeline("sentiment-analysis")
+    sentimentModel = get_sentiment_model()
     sentimentResult = sentimentModel("What is the overall sentiment of the following text?\n" + text[:512])
     st.write("### Sentiment of the text:")
     st.write(sentimentResult[0])
@@ -47,7 +84,7 @@ def analyzeSentiment(text):
 
 
 def findEntities(text):
-    nerModel = pipeline("ner", grouped_entities=True)
+    nerModel = get_ner_model()
     entitiesResult = nerModel("Extract and categorize named entities from the following:\n" + text[:1000])
     st.write("### Named entities found:")
     st.write(entitiesResult)
@@ -55,7 +92,7 @@ def findEntities(text):
 
 
 def findMainTopic(text):
-    qaModel = pipeline("question-answering")
+    qaModel = get_qa_model()
     question = "What is the main topic of the document?"
     answer = qaModel(question=question, context=text[:1000])
     st.write("### Main topic:")
@@ -77,10 +114,8 @@ def chunk_text(text, chunk_size=500, overlap=50):
     return chunks
 
 
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-
-
 def embed_chunks(chunks):
+    embedding_model = get_embedding_model()
     embeddings = embedding_model.encode(chunks)
     return embeddings
 
@@ -93,16 +128,14 @@ def build_faiss_index(embeddings):
 
 
 def retrieve_chunks(question, chunks, index, top_k=3):
-    question_embedding = embedding_model.encode([question])
+    question_embedding = get_embedding_model().encode([question])
     distances, indices = index.search(question_embedding, top_k)
     retrieved_chunks = [chunks[i] for i in indices[0]]
     return retrieved_chunks
 
 
-qa_generator = pipeline("text2text-generation", model="facebook/bart-large-cnn")
-
-
 def rag_answer(question, retrieved_chunks):
+    qa_generator = get_qa_generator()
     context = " ".join(retrieved_chunks)
     input_text = f"question: {question} context: {context}"
     output = qa_generator(input_text, max_length=150, min_length=30, do_sample=False)
@@ -126,22 +159,9 @@ def askQuestionsRAG(text):
             st.error(f"Error retrieving answer: {e}")
 
 
-def load_or_init_model():
-    model_name = "facebook/bart-large-cnn"
-    if os.path.exists('./fine_tuned_model'):
-        tokenizer = AutoTokenizer.from_pretrained('./fine_tuned_model')
-        model = AutoModelForSeq2SeqLM.from_pretrained('./fine_tuned_model')
-        st.write("Loaded fine-tuned model from disk.")
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        st.write("Loaded base model.")
-    return tokenizer, model
-
-
 def fineTune(text, improvedSummary):
     if text and improvedSummary.strip() != "":
-        tokenizer, model = load_or_init_model()
+        tokenizer, model = get_tokenizer_and_model()
 
         inputEncodings = tokenizer([text], max_length=1024, truncation=True, padding="max_length", return_tensors="pt")
         targetEncodings = tokenizer([improvedSummary], max_length=150, truncation=True, padding="max_length", return_tensors="pt")
@@ -151,7 +171,6 @@ def fineTune(text, improvedSummary):
                 self.inputs = inputs
                 self.targets = targets
             def __len__(self):
-                # fix here: use size(0) for tensors length
                 return self.targets["input_ids"].size(0)
             def __getitem__(self, idx):
                 item = {key: val[idx] for key, val in self.inputs.items()}
@@ -164,7 +183,7 @@ def fineTune(text, improvedSummary):
 
         trainingArgs = TrainingArguments(
             output_dir='./results',
-            num_train_epochs=3,
+            num_train_epochs=1,
             per_device_train_batch_size=1,
             logging_steps=10,
             save_strategy="no",
