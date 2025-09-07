@@ -1,8 +1,8 @@
-streamlit
-transformers
-sentencepiece
-sentence-transformers
-faiss-cpu
-PyPDF2
-torch
-numpy
+streamlit==1.36.0
+transformers==4.41.2
+sentencepiece==0.2.0
+sentence-transformers==2.7.0
+faiss-cpu==1.8.0
+PyPDF2==3.0.1
+torch==2.2.2
+numpy==1.26.4
