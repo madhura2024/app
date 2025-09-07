@@ -6,7 +6,7 @@ import PyPDF2
 import torch
 import os
 import numpy as np
-import time
+
 
 # ------------------ File Upload ------------------
 def getText():
@@ -68,7 +68,7 @@ def findMainTopic(text):
 
 
 # ------------------ RAG Helpers ------------------
-def chunk_text(text, chunk_size=300, overlap=50):  # Reduced chunk size for faster processing
+def chunk_text(text, chunk_size=500, overlap=50):
     tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
     tokens = tokenizer.tokenize(text)
 
@@ -94,7 +94,7 @@ def build_faiss_index(embeddings):
     index.add(embeddings)
     return index
 
-def retrieve_chunks(question, chunks, index, top_k=3):  # Limit to top 3 chunks
+def retrieve_chunks(question, chunks, index, top_k=3):
     question_embedding = embedding_model.encode([question])
     distances, indices = index.search(question_embedding, top_k)
     retrieved_chunks = [chunks[i] for i in indices[0]]
@@ -108,6 +108,18 @@ def rag_answer(question, retrieved_chunks):
     input_text = f"question: {question} context: {context}"
     output = qa_generator(input_text, max_length=150, min_length=30, do_sample=False)
     return output[0]['generated_text']
+
+
+def askQuestionsRAG(text):
+    chunks = chunk_text(text)
+    embeddings = embed_chunks(chunks)
+    index = build_faiss_index(np.array(embeddings))
+
+    question = st.text_input("Ask a question about the document:")
+    if question:
+        retrieved_chunks = retrieve_chunks(question, chunks, index)
+        answer = rag_answer(question, retrieved_chunks)
+        st.write("**Answer:**", answer)
 
 
 # ------------------ Fine-Tuning ------------------
@@ -190,4 +202,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    run() i want to run this on streamlit
