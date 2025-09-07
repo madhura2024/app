@@ -5,4 +5,4 @@ sentence-transformers==2.7.0
 faiss-cpu==1.8.0
 PyPDF2==3.0.1
 numpy==1.26.4
-torch
+torch==2.0.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
