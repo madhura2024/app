@@ -112,7 +112,6 @@ def rag_answer(question, retrieved_chunks):
 
 # ------------------ RAG Function with One Question ------------------
 def askQuestionsRAG(text):
-    # Use a spinner to show that the system is processing the question
     with st.spinner("Processing your question..."):
         try:
             # Step 1: Chunk the text into smaller chunks for embedding and retrieval
