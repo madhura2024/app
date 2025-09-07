@@ -6,7 +6,7 @@ import PyPDF2
 import torch
 import os
 import numpy as np
-
+import time
 
 # ------------------ File Upload ------------------
 def getText():
@@ -110,16 +110,22 @@ def rag_answer(question, retrieved_chunks):
     return output[0]['generated_text']
 
 
+# ------------------ RAG Function ------------------
 def askQuestionsRAG(text):
-    chunks = chunk_text(text)
-    embeddings = embed_chunks(chunks)
-    index = build_faiss_index(np.array(embeddings))
+    with st.spinner("Processing your question..."):
+        time.sleep(1)  # Simulate some delay (adjust if needed)
 
-    question = st.text_input("Ask a question about the document:")
-    if question:
-        retrieved_chunks = retrieve_chunks(question, chunks, index)
-        answer = rag_answer(question, retrieved_chunks)
-        st.write("**Answer:**", answer)
+        chunks = chunk_text(text)
+        embeddings = embed_chunks(chunks)
+        index = build_faiss_index(np.array(embeddings))
+
+        question = st.text_input("Ask a question about the document:")
+        if question:
+            st.write(f"Received question: {question}")
+            retrieved_chunks = retrieve_chunks(question, chunks, index)
+            st.write(f"Retrieved chunks: {retrieved_chunks}")
+            answer = rag_answer(question, retrieved_chunks)
+            st.write("**Answer:**", answer)
 
 
 # ------------------ Fine-Tuning ------------------
@@ -202,4 +208,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run() here it tops workuing
+    run()
