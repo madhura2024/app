@@ -1,5 +1,5 @@
 import streamlit as st
-from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM, Trainer, TrainingArguments
+from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 from sentence_transformers import SentenceTransformer
 import faiss
 import PyPDF2
@@ -8,38 +8,38 @@ import os
 import numpy as np
 import transformers
 
-# Silence warnings & avoid tokenizer crash
+# Silence warnings & tokenizer crash
 transformers.logging.set_verbosity_error()
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # -------------------------
 # Cached Models
 # -------------------------
-@st.cache_resource(show_spinner=False, allow_output_mutation=True)
+@st.cache_resource(show_spinner=False)
 def get_embedding_model():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
-@st.cache_resource(show_spinner=False, allow_output_mutation=True)
+@st.cache_resource(show_spinner=False)
 def get_summarizer():
-    return pipeline("summarization", model="facebook/bart-large-cnn")
+    return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
-@st.cache_resource(show_spinner=False, allow_output_mutation=True)
+@st.cache_resource(show_spinner=False)
 def get_sentiment_model():
     return pipeline("sentiment-analysis")
 
-@st.cache_resource(show_spinner=False, allow_output_mutation=True)
+@st.cache_resource(show_spinner=False)
 def get_ner_model():
     return pipeline("ner", grouped_entities=True)
 
-@st.cache_resource(show_spinner=False, allow_output_mutation=True)
+@st.cache_resource(show_spinner=False)
 def get_qa_model():
     return pipeline("question-answering")
 
-@st.cache_resource(show_spinner=False, allow_output_mutation=True)
+@st.cache_resource(show_spinner=False)
 def get_qa_generator():
-    return pipeline("text2text-generation", model="facebook/bart-large-cnn")
+    return pipeline("text2text-generation", model="sshleifer/distilbart-cnn-12-6")
 
-@st.cache_resource(show_spinner=False, allow_output_mutation=True)
+@st.cache_resource(show_spinner=False)
 def get_tokenizer_and_model():
     model_path = './fine_tuned_model'
     if os.path.exists(model_path):
@@ -47,10 +47,9 @@ def get_tokenizer_and_model():
         model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
         st.success("Loaded fine-tuned model.")
     else:
-        tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
-        model = AutoModelForSeq2SeqLM.from_pretrained("facebook/bart-large-cnn")
+        tokenizer = AutoTokenizer.from_pretrained("sshleifer/distilbart-cnn-12-6")
+        model = AutoModelForSeq2SeqLM.from_pretrained("sshleifer/distilbart-cnn-12-6")
     return tokenizer, model
-
 
 # -------------------------
 # File Upload
@@ -74,7 +73,6 @@ def getText():
         content = None
     return content
 
-
 # -------------------------
 # Summarization
 # -------------------------
@@ -87,28 +85,25 @@ def summarize(text):
     userSummary = st.text_input("Is this summary good? If not, type your improved summary here. Otherwise, leave blank:")
     return summaryResult[0]['summary_text'], userSummary
 
-
 # -------------------------
 # Sentiment
 # -------------------------
 def analyzeSentiment(text):
     sentimentModel = get_sentiment_model()
-    sentimentResult = sentimentModel(text[:512])  # FIXED: only pass raw text
+    sentimentResult = sentimentModel(text[:512])
     st.write("### Sentiment of the text:")
     st.write(sentimentResult[0])
     return sentimentResult[0]
-
 
 # -------------------------
 # NER
 # -------------------------
 def findEntities(text):
     nerModel = get_ner_model()
-    entitiesResult = nerModel(text[:1000])  # FIXED: only pass raw text
+    entitiesResult = nerModel(text[:1000])
     st.write("### Named entities found:")
     st.write(entitiesResult)
     return entitiesResult
-
 
 # -------------------------
 # Main Topic
@@ -121,12 +116,11 @@ def findMainTopic(text):
     st.write(answer['answer'])
     return answer['answer']
 
-
 # -------------------------
 # RAG Helpers
 # -------------------------
 def chunk_text(text, chunk_size=500, overlap=50):
-    tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
+    tokenizer = AutoTokenizer.from_pretrained("sshleifer/distilbart-cnn-12-6")
     tokens = tokenizer.tokenize(text)
 
     chunks = []
@@ -138,12 +132,10 @@ def chunk_text(text, chunk_size=500, overlap=50):
         start += chunk_size - overlap
     return chunks
 
-
 def embed_chunks(chunks):
     embedding_model = get_embedding_model()
     embeddings = embedding_model.encode(chunks)
-    return embeddings
-
+    return np.array(embeddings).astype("float32")   # FIXED for FAISS
 
 def build_faiss_index(embeddings):
     dim = embeddings.shape[1]
@@ -151,13 +143,11 @@ def build_faiss_index(embeddings):
     index.add(embeddings)
     return index
 
-
 def retrieve_chunks(question, chunks, index, top_k=3):
-    question_embedding = get_embedding_model().encode([question])
+    question_embedding = get_embedding_model().encode([question]).astype("float32")
     distances, indices = index.search(question_embedding, top_k)
     retrieved_chunks = [chunks[i] for i in indices[0]]
     return retrieved_chunks
-
 
 def rag_answer(question, retrieved_chunks):
     qa_generator = get_qa_generator()
@@ -166,11 +156,10 @@ def rag_answer(question, retrieved_chunks):
     output = qa_generator(input_text, max_length=150, min_length=30, do_sample=False)
     return output[0]['generated_text']
 
-
 def askQuestionsRAG(text):
     chunks = chunk_text(text)
     embeddings = embed_chunks(chunks)
-    index = build_faiss_index(np.array(embeddings))
+    index = build_faiss_index(embeddings)
 
     st.write("\nYou can now ask questions based on the document. Type your question and press enter.")
     question = st.text_input("Ask a question or leave blank to stop:", key="rag_question")
@@ -180,64 +169,14 @@ def askQuestionsRAG(text):
             answer = rag_answer(question, retrieved_chunks)
             st.write("**Answer:**", answer)
         except Exception as e:
-            st.error(f"Error retrieving answer: {e}")
-
+            st.exception(e)   # FIXED: show full error
 
 # -------------------------
-# Fine-tuning
+# Fine-tuning (disabled on Cloud)
 # -------------------------
 def fineTune(text, improvedSummary):
-    if text and improvedSummary.strip() != "":
-        tokenizer, model = get_tokenizer_and_model()
-
-        inputEncodings = tokenizer([text], max_length=1024, truncation=True, padding="max_length", return_tensors="pt")
-        targetEncodings = tokenizer([improvedSummary], max_length=150, truncation=True, padding="max_length", return_tensors="pt")
-
-        class SummaryDataset(torch.utils.data.Dataset):
-            def __init__(self, inputs, targets):
-                self.inputs = inputs
-                self.targets = targets
-            def __len__(self):
-                return self.targets["input_ids"].size(0)
-            def __getitem__(self, idx):
-                item = {key: val[idx] for key, val in self.inputs.items()}
-                labels = self.targets["input_ids"][idx]
-                labels[labels == tokenizer.pad_token_id] = -100
-                item['labels'] = labels
-                return item
-
-        dataset = SummaryDataset(inputEncodings, targetEncodings)
-
-        trainingArgs = TrainingArguments(
-            output_dir='./results',
-            num_train_epochs=1,
-            per_device_train_batch_size=1,
-            logging_steps=10,
-            save_strategy="no",
-            learning_rate=2e-5,
-            weight_decay=0.01,
-            save_total_limit=1,
-            remove_unused_columns=False,
-            report_to=[],
-            disable_tqdm=True  # FIXED: avoid progress bar crash
-        )
-
-        trainer = Trainer(
-            model=model,
-            args=trainingArgs,
-            train_dataset=dataset,
-            tokenizer=tokenizer,
-        )
-
-        st.write("\nStarting fine-tuning on your improved summary... This may take some time.")
-        trainer.train()
-        st.write("\nFine-tuning complete! Your model has learned from your correction.")
-        model.save_pretrained('./fine_tuned_model')
-        tokenizer.save_pretrained('./fine_tuned_model')
-        st.write("Saved fine-tuned model and tokenizer to './fine_tuned_model'")
-    else:
-        st.write("\nNo improved summary provided; skipping fine-tuning.")
-
+    st.warning("⚠ Fine-tuning disabled on Streamlit Cloud due to resource limits. Run locally instead.")
+    return
 
 # -------------------------
 # Main Run
@@ -252,7 +191,6 @@ def run():
         state['topic'] = findMainTopic(state['content'])
         askQuestionsRAG(state['content'])
         fineTune(state['content'], state['userSummary'])
-
 
 if __name__ == "__main__":
     run()
