@@ -110,22 +110,36 @@ def rag_answer(question, retrieved_chunks):
     return output[0]['generated_text']
 
 
-# ------------------ RAG Function ------------------
+# ------------------ RAG Function with One Question ------------------
 def askQuestionsRAG(text):
+    # Use a spinner to show that the system is processing the question
     with st.spinner("Processing your question..."):
-        time.sleep(1)  # Simulate some delay (adjust if needed)
-
         chunks = chunk_text(text)
         embeddings = embed_chunks(chunks)
         index = build_faiss_index(np.array(embeddings))
 
-        question = st.text_input("Ask a question about the document:")
-        if question:
-            st.write(f"Received question: {question}")
-            retrieved_chunks = retrieve_chunks(question, chunks, index)
-            st.write(f"Retrieved chunks: {retrieved_chunks}")
-            answer = rag_answer(question, retrieved_chunks)
-            st.write("**Answer:**", answer)
+        # Initialize the session state to store if the user has asked a question
+        if "question_asked" not in st.session_state:
+            st.session_state["question_asked"] = False
+
+        if st.session_state["question_asked"]:
+            st.write("You can only ask one question.")
+            # Optionally, allow user to reset the session
+            if st.button("Reset"):
+                st.session_state["question_asked"] = False
+                st.experimental_rerun()  # Rerun the app to clear the previous input
+        else:
+            # Ask the user for a question
+            question = st.text_input("Ask a question about the document:", key="question")
+
+            if question:
+                # Mark that the question has been asked
+                st.session_state["question_asked"] = True
+
+                # Process the question (retrieving chunks, generating answer)
+                retrieved_chunks = retrieve_chunks(question, chunks, index)
+                answer = rag_answer(question, retrieved_chunks)
+                st.write("**Answer:**", answer)
 
 
 # ------------------ Fine-Tuning ------------------
