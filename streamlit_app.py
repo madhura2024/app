@@ -6,33 +6,40 @@ import PyPDF2
 import torch
 import os
 import numpy as np
+import transformers
 
-# Load models once with caching
-@st.cache_resource
+# Silence warnings & avoid tokenizer crash
+transformers.logging.set_verbosity_error()
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# -------------------------
+# Cached Models
+# -------------------------
+@st.cache_resource(show_spinner=False, allow_output_mutation=True)
 def get_embedding_model():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False, allow_output_mutation=True)
 def get_summarizer():
     return pipeline("summarization", model="facebook/bart-large-cnn")
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False, allow_output_mutation=True)
 def get_sentiment_model():
     return pipeline("sentiment-analysis")
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False, allow_output_mutation=True)
 def get_ner_model():
     return pipeline("ner", grouped_entities=True)
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False, allow_output_mutation=True)
 def get_qa_model():
     return pipeline("question-answering")
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False, allow_output_mutation=True)
 def get_qa_generator():
     return pipeline("text2text-generation", model="facebook/bart-large-cnn")
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False, allow_output_mutation=True)
 def get_tokenizer_and_model():
     model_path = './fine_tuned_model'
     if os.path.exists(model_path):
@@ -45,6 +52,9 @@ def get_tokenizer_and_model():
     return tokenizer, model
 
 
+# -------------------------
+# File Upload
+# -------------------------
 def getText():
     uploaded_file = st.file_uploader("Upload a PDF or TXT file", type=['pdf', 'txt'])
     if uploaded_file is None:
@@ -65,9 +75,12 @@ def getText():
     return content
 
 
+# -------------------------
+# Summarization
+# -------------------------
 def summarize(text):
     summarizer = get_summarizer()
-    summaryResult = summarizer("Summarize this document clearly and concisely:\n" + text, max_length=150, min_length=30, do_sample=False)
+    summaryResult = summarizer(text, max_length=150, min_length=30, do_sample=False)
     st.write("### Summary:")
     st.write(summaryResult[0]['summary_text'])
 
@@ -75,22 +88,31 @@ def summarize(text):
     return summaryResult[0]['summary_text'], userSummary
 
 
+# -------------------------
+# Sentiment
+# -------------------------
 def analyzeSentiment(text):
     sentimentModel = get_sentiment_model()
-    sentimentResult = sentimentModel("What is the overall sentiment of the following text?\n" + text[:512])
+    sentimentResult = sentimentModel(text[:512])  # FIXED: only pass raw text
     st.write("### Sentiment of the text:")
     st.write(sentimentResult[0])
     return sentimentResult[0]
 
 
+# -------------------------
+# NER
+# -------------------------
 def findEntities(text):
     nerModel = get_ner_model()
-    entitiesResult = nerModel("Extract and categorize named entities from the following:\n" + text[:1000])
+    entitiesResult = nerModel(text[:1000])  # FIXED: only pass raw text
     st.write("### Named entities found:")
     st.write(entitiesResult)
     return entitiesResult
 
 
+# -------------------------
+# Main Topic
+# -------------------------
 def findMainTopic(text):
     qaModel = get_qa_model()
     question = "What is the main topic of the document?"
@@ -100,6 +122,9 @@ def findMainTopic(text):
     return answer['answer']
 
 
+# -------------------------
+# RAG Helpers
+# -------------------------
 def chunk_text(text, chunk_size=500, overlap=50):
     tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
     tokens = tokenizer.tokenize(text)
@@ -148,7 +173,6 @@ def askQuestionsRAG(text):
     index = build_faiss_index(np.array(embeddings))
 
     st.write("\nYou can now ask questions based on the document. Type your question and press enter.")
-
     question = st.text_input("Ask a question or leave blank to stop:", key="rag_question")
     if question:
         try:
@@ -159,6 +183,9 @@ def askQuestionsRAG(text):
             st.error(f"Error retrieving answer: {e}")
 
 
+# -------------------------
+# Fine-tuning
+# -------------------------
 def fineTune(text, improvedSummary):
     if text and improvedSummary.strip() != "":
         tokenizer, model = get_tokenizer_and_model()
@@ -192,6 +219,7 @@ def fineTune(text, improvedSummary):
             save_total_limit=1,
             remove_unused_columns=False,
             report_to=[],
+            disable_tqdm=True  # FIXED: avoid progress bar crash
         )
 
         trainer = Trainer(
@@ -211,6 +239,9 @@ def fineTune(text, improvedSummary):
         st.write("\nNo improved summary provided; skipping fine-tuning.")
 
 
+# -------------------------
+# Main Run
+# -------------------------
 def run():
     state = {}
     state['content'] = getText()
