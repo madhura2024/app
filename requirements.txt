@@ -3,7 +3,6 @@ transformers
 sentencepiece
 sentence-transformers
 faiss-cpu
-pypdf2
+PyPDF2
 torch
 numpy
-
