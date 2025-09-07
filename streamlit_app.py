@@ -8,9 +8,7 @@ import os
 import numpy as np
 
 
-
-
-
+# ------------------ File Upload ------------------
 def getText():
     uploaded_file = st.file_uploader("Upload a PDF or TXT file", type=['pdf', 'txt'])
     if uploaded_file is None:
@@ -29,12 +27,11 @@ def getText():
     return content
 
 
-
-
-
+# ------------------ Summarization ------------------
 def summarize(text):
-    summarizer = pipeline("summarization")
-    summaryResult = summarizer("Summarize this document clearly and concisely:\n" + text, max_length=150, min_length=30, do_sample=False)
+    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+    summaryResult = summarizer(text, max_length=150, min_length=30, do_sample=False)
+
     st.write("### Summary:")
     st.write(summaryResult[0]['summary_text'])
 
@@ -42,33 +39,27 @@ def summarize(text):
     return summaryResult[0]['summary_text'], userSummary
 
 
-
-
-
+# ------------------ Sentiment Analysis ------------------
 def analyzeSentiment(text):
-    sentimentModel = pipeline("sentiment-analysis")
-    sentimentResult = sentimentModel("What is the overall sentiment of the following text?\n" + text[:512])
+    sentimentModel = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+    sentimentResult = sentimentModel(text[:512])
     st.write("### Sentiment of the text:")
     st.write(sentimentResult[0])
     return sentimentResult[0]
 
 
-
-
-
+# ------------------ NER ------------------
 def findEntities(text):
-    nerModel = pipeline("ner", grouped_entities=True)
-    entitiesResult = nerModel("Extract and categorize named entities from the following:\n" + text[:1000])
+    nerModel = pipeline("ner", model="dslim/bert-base-NER", grouped_entities=True)
+    entitiesResult = nerModel(text[:1000])
     st.write("### Named entities found:")
     st.write(entitiesResult)
     return entitiesResult
 
 
-
-
-
+# ------------------ Main Topic ------------------
 def findMainTopic(text):
-    qaModel = pipeline("question-answering")
+    qaModel = pipeline("question-answering", model="distilbert-base-cased-distilled-squad")
     question = "What is the main topic of the document?"
     answer = qaModel(question=question, context=text[:1000])
     st.write("### Main topic:")
@@ -76,10 +67,7 @@ def findMainTopic(text):
     return answer['answer']
 
 
-
-
-
-
+# ------------------ RAG Helpers ------------------
 def chunk_text(text, chunk_size=500, overlap=50):
     tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
     tokens = tokenizer.tokenize(text)
@@ -92,6 +80,7 @@ def chunk_text(text, chunk_size=500, overlap=50):
         chunks.append(chunk)
         start += chunk_size - overlap
     return chunks
+
 
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
@@ -111,6 +100,7 @@ def retrieve_chunks(question, chunks, index, top_k=3):
     retrieved_chunks = [chunks[i] for i in indices[0]]
     return retrieved_chunks
 
+
 qa_generator = pipeline("text2text-generation", model="facebook/bart-large-cnn")
 
 def rag_answer(question, retrieved_chunks):
@@ -119,27 +109,20 @@ def rag_answer(question, retrieved_chunks):
     output = qa_generator(input_text, max_length=150, min_length=30, do_sample=False)
     return output[0]['generated_text']
 
+
 def askQuestionsRAG(text):
     chunks = chunk_text(text)
     embeddings = embed_chunks(chunks)
     index = build_faiss_index(np.array(embeddings))
 
-    st.write("\nYou can now ask questions based on the document. Type your question and press enter.")
-    while True:
-        question = st.text_input("Ask a question or leave blank to stop:", key="rag_question")
-        if not question:
-            break
+    question = st.text_input("Ask a question about the document:")
+    if question:
         retrieved_chunks = retrieve_chunks(question, chunks, index)
         answer = rag_answer(question, retrieved_chunks)
         st.write("**Answer:**", answer)
 
 
-
-
-
-
-
-
+# ------------------ Fine-Tuning ------------------
 def load_or_init_model():
     model_name = "facebook/bart-large-cnn"
     if os.path.exists('./fine_tuned_model'):
@@ -151,11 +134,6 @@ def load_or_init_model():
         model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
         st.write("Loaded base model.")
     return tokenizer, model
-
-
-
-
-
 
 
 def fineTune(text, improvedSummary):
@@ -200,22 +178,17 @@ def fineTune(text, improvedSummary):
             tokenizer=tokenizer,
         )
 
-        st.write("\nStarting fine-tuning on your improved summary... This may take some time.")
+        st.write("Starting fine-tuning on your improved summary... This may take some time.")
         trainer.train()
-        st.write("\nFine-tuning complete! Your model has learned from your correction.")
+        st.write("Fine-tuning complete! Your model has learned from your correction.")
         model.save_pretrained('./fine_tuned_model')
         tokenizer.save_pretrained('./fine_tuned_model')
         st.write("Saved fine-tuned model and tokenizer to './fine_tuned_model'")
     else:
-        st.write("\nNo improved summary provided; skipping fine-tuning.")
+        st.write("No improved summary provided; skipping fine-tuning.")
 
 
-
-
-
-
-
-
+# ------------------ Main Run ------------------
 def run():
     state = {}
     state['content'] = getText()
@@ -226,6 +199,7 @@ def run():
         state['topic'] = findMainTopic(state['content'])
         askQuestionsRAG(state['content'])
         fineTune(state['content'], state['userSummary'])
+
 
 if __name__ == "__main__":
     run()
